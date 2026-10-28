@@ -539,3 +539,32 @@ const css = `<style>
 const file = theme === "light" ? "usb-c-light.html" : "usb-c.html";
 writeFileSync(join(HERE, file), k.pageHtml({ title: "USB-C anatomy", theme, body: css + body, script: kitScript() + shared + live, width: 760 }));
 console.log("wrote", file);
+
+// A theme-following version for publishing as an artifact: the page follows the viewer's light or dark setting.
+if (theme === "light") {
+  const artifact = `<title>USB-C Anatomy</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+:root{--page:#f2f2ef}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--page:#0b0b0b;color-scheme:dark}}
+:root[data-theme="dark"]{--page:#0b0b0b;color-scheme:dark}
+body{background:var(--page);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0}
+*{box-sizing:border-box}
+.iso-page{width:min(760px,100%);margin:40px auto 64px;color:var(--anatomy-text);font:14px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+${k.ISO_CSS}
+</style>
+${css}
+<main class="iso iso-page" data-theme="light">${body}</main>
+<script type="module">
+const main = document.querySelector("main.iso");
+const dark = matchMedia("(prefers-color-scheme: dark)");
+const sync = () => { main.dataset.theme = document.documentElement.dataset.theme || (dark.matches ? "dark" : "light"); };
+sync();
+dark.addEventListener("change", sync);
+new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+${(kitScript() + shared + live).replace(/<\/(script)/gi, "<\\/$1")}
+</script>
+`;
+  writeFileSync(join(HERE, "usb-c-artifact.html"), artifact);
+  console.log("wrote usb-c-artifact.html");
+}
