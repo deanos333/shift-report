@@ -40,9 +40,11 @@ const PAD_END = -66;
 
 // Plug, built with its shell face at x = 0 and moved as one group with its carriage.
 const PLUG = { w: 8.25 * MM, h: 2.4 * MM, len: 6.65 * MM };
-const MOLD = { w: 128, h: 60, r: 14, from: PLUG.len, to: 200 };
-const BOOT = { from: 200, to: 248, r0: 26, r1: 21 };
-const CABLE = { from: 248, to: 300, r: 18 };
+// A chunky-style machined plug: a flat black block with a thumb scoop, a round barrel with two
+// diamond-knurled bands and a plain collar, then a thick matte cable (sizes read off product photos).
+const MOLD = { w: 104, h: 70, r: 14, from: PLUG.len, to: 140 };
+const BARREL = { r: 52, knurl: [[136, 160], [163, 187]], collar: [187, 226], groove: 216, end: 230 };
+const CABLE = { from: 230, to: 310, r: 34 };
 const CONTACT = 34; // plug contact points sit 2.8 mm behind the shell face
 const CUT = 9; // both shells are cut away 0.75 mm above the axis, just over the tongue
 const REST = 90;
@@ -287,7 +289,7 @@ const PLUG_POLY = stadium(PLUG.w, PLUG.h, 12);
 const MOLD_POLY = section(MOLD.w, MOLD.h, MOLD.r, 8);
 const MOLD_TOP = ZA + MOLD.h / 2;
 const MOLD_BOTTOM = ZA - MOLD.h / 2;
-const JAW = { x: 110, w: 68, t: 8 };
+const JAW = { x: 88, w: 46, t: 8 };
 
 function carriagePlate() {
   const out = [`<path class="iso-halo" d="${k.haloOf(k.insetPlan(CARRIAGE, 4), CARRIAGE_Z, 0.1, P)}" style="filter:blur(5px)"/>`];
@@ -318,16 +320,18 @@ function plugShell() {
 function overmold() {
   const out = [];
   const F = XF(0);
-  const slots = Array.from({ length: 6 }, (_, i) => {
-    const x = 138 + i * 9;
-    return path([[x, MOLD.w / 2, ZA - 12], [x + 3, MOLD.w / 2, ZA - 12], [x + 3, MOLD.w / 2, ZA + 12], [x, MOLD.w / 2, ZA + 12]]);
-  }).join("");
-  const band = path(onSection(MOLD.from + 6, MOLD_POLY).filter(([, y, z]) => true), true);
-  out.push(S(G.prismOf(F, MOLD_POLY, MOLD.from, MOLD.to, P), { tone: "hi", inner: L(slots, { tone: "lo" }) }));
-  // the one engraved mark: printed on the A side only, so it shows which way up the plug is
-  out.push(`<g data-part="mark">${k.faceTextSvg(k.topMatrix([118, 0], MOLD_TOP, P, "x"), "USB-C", { size: 9, tone: "lo", anchor: "middle" })}</g>`);
-  void band;
-  return out.join("");
+  // thumb scoop pressed into the top face: a D with its flat edge toward the plug's nose
+  const top = MOLD_TOP;
+  const scoop = [[MOLD.from + 6, -24, top]];
+  for (let i = 0; i <= 24; i++) {
+    const a = -Math.PI / 2 + (Math.PI * i) / 24;
+    scoop.push([MOLD.from + 6 + 26 * Math.cos(a), 24 * Math.sin(a), top]);
+  }
+  const scoopPath = path(scoop);
+  const scoopShade = `<path class="iso-shade" data-shade="1" d="${scoopPath}"/>`;
+  const rim = path(scoop.map(([x, y, z]) => [x + 1.6, y * 0.9, z]));
+  out.push(S(G.prismOf(F, MOLD_POLY, MOLD.from, MOLD.to, P), { tone: "hi", inner: scoopShade + L(scoopPath, { tone: "lo" }) + L(rim, { tone: "faint" }) }));
+  return `<g class="usb-anodized">${out.join("")}</g>`;
 }
 
 function carriageFront() {
@@ -348,21 +352,33 @@ function carriageFront() {
 function bootAndCable() {
   const out = [];
   const F = XF(0);
-  const slope = (BOOT.r1 - BOOT.r0) / (BOOT.to - BOOT.from);
-  const radius = (s) => BOOT.r0 + slope * (s - BOOT.from);
-  const ribs = [210, 220, 230, 240].map((s) => G.arcOf(F, s, radius(s), P, { slope })).join("");
-  out.push(S(G.solidOf([[BOOT.from, BOOT.r0], [BOOT.to, BOOT.r1]], F, P), { tone: "hi", inner: L(ribs, { tone: "lo" }) }));
-  out.push(S(G.disc(CABLE.from, CABLE.to, CABLE.r, F, P), { tone: "mid" }));
-  // the cut end of the cable: jacket, braid, and the conductors inside
+  const R = BARREL.r;
+  const knurl = ([s0, s1]) => {
+    const solid = G.disc(s0, s1, R, F, P);
+    const fade = { fade: [0.1, 0.55] };
+    const lines = [...G.ribsOf(F, s0, s1, R, 46, P, { ...fade, twist: 0.5 }), ...G.ribsOf(F, s0, s1, R, 46, P, { ...fade, twist: -0.5, seams: true })];
+    return S(solid, { tone: "hi", inner: k.fadedSvg(lines, { tone: "lo" }) });
+  };
+  const metal = [];
+  metal.push(knurl(BARREL.knurl[0]));
+  metal.push(S(G.disc(BARREL.knurl[0][1], BARREL.knurl[1][0], R - 2.4, F, P), { tone: "hi" }));
+  metal.push(knurl(BARREL.knurl[1]));
+  const [c0, c1] = BARREL.collar;
+  metal.push(S(G.disc(c0, c1, R - 1.2, F, P), { tone: "hi", inner: L(G.arcOf(F, BARREL.groove, R - 1.2, P), { tone: "lo" }) }));
+  metal.push(S(G.solidOf([[c1, R - 1.2], [BARREL.end, R - 5]], F, P), { tone: "hi" }));
+  out.push(`<g class="usb-anodized">${metal.join("")}</g>`);
+  // the cable, its printed wordmark on the A side, and its cut end with the conductors inside
+  const jacket = [S(G.disc(CABLE.from, CABLE.to, CABLE.r, F, P), { tone: "hi" })];
+  jacket.push(`<g data-part="mark">${k.faceTextSvg(k.topMatrix([CABLE.from + 46, 0], ZA + CABLE.r, P, "x"), "chunky®", { size: 13, tone: "hi", anchor: "middle" })}</g>`);
   const face = CABLE.to;
-  const cut = [L(G.circleOf(F, face, CABLE.r - 2, P), { tone: "lo" }), L(G.circleOf(F, face, CABLE.r - 3.4, P), { tone: "faint" })];
-  const wires = [[0, 8.4, 2.6], [0, -8.4, 2.6], [8.4, 0, 2.6], [-8.4, 0, 2.6], [6, 6, 1.8], [-6, 6, 1.8], [6, -6, 1.8], [-6, -6, 1.8], [0, 0, 1.6]];
+  jacket.push(L(G.circleOf(F, face, CABLE.r - 3, P), { tone: "lo" }), L(G.circleOf(F, face, CABLE.r - 5, P), { tone: "faint" }));
+  const wires = [[0, 14, 4.4], [0, -14, 4.4], [14, 0, 4.4], [-14, 0, 4.4], [10, 10, 3], [-10, 10, 3], [10, -10, 3], [-10, -10, 3], [0, 0, 3.2]];
   for (const [y, z, r] of wires) {
     const W = G.frameOf([0, y, ZA + z], [1, 0, 0], [0, 1, 0], [0, 0, 1]);
-    cut.push(L(G.circleOf(W, face, r, P), { tone: r > 2 ? "mid" : "lo" }));
-    cut.push(D([at([face, y, ZA + z])], { size: r > 2 ? 0.7 : 0.5, tone: "mid" }));
+    jacket.push(L(G.circleOf(W, face, r, P), { tone: r > 4 ? "mid" : "lo" }));
+    jacket.push(D([at([face, y, ZA + z])], { size: r > 4 ? 0.8 : 0.6, tone: "mid" }));
   }
-  out.push(cut.join(""));
+  out.push(`<g class="usb-jacket">${jacket.join("")}</g>`);
   return out.join("");
 }
 
@@ -384,7 +400,7 @@ const svg = k.figureSvg({
   width: WIDTH,
   height: HEIGHT,
   label:
-    "A USB-C receptacle soldered to a small circuit board, and a USB-C plug held in a clamp on a carriage that slides on two rails toward it. Through the receptacle's mouth you can see the tongue with its row of 12 gold pads; the four power pads are longer than the rest. The plug is a thin metal shell in a moulded body with a strain-relief boot and a cut cable showing its conductors.",
+    "A USB-C receptacle soldered to a small circuit board, and a chunky-style USB-C cable plug — a black machined block with a thumb scoop, a knurled barrel and a thick blue cable — held in a clamp on a carriage that slides on two rails toward it. Through the receptacle's mouth you can see the tongue with its row of 12 gold pads; the four power pads are longer than the rest.",
   body: [
     plate(),
     rails(),
@@ -529,6 +545,11 @@ const css = `<style>
 .iso[data-theme="light"] .usb-whole .usb-cavity{--anatomy-paper:#a9a9a6;--anatomy-top:#c4c4c1;--anatomy-shade-0:#9c9c99;--anatomy-shade-1:#a4a4a1;--anatomy-shade-2:#acaca9;--anatomy-shade-3:#b4b4b1}
 .usb-cut .usb-cavity{--anatomy-top:#151515;--anatomy-shade-0:#0b0b0b;--anatomy-shade-1:#0d0d0d;--anatomy-shade-2:#0f0f0f;--anatomy-shade-3:#121212}
 .iso[data-theme="light"] .usb-cut .usb-cavity{--anatomy-top:#e2e2df;--anatomy-shade-0:#c9c9c6;--anatomy-shade-1:#d0d0cd;--anatomy-shade-2:#d7d7d4;--anatomy-shade-3:#dddddb}
+.usb-anodized{--anatomy-paper:#0c0c0d;--anatomy-top:#1a1a1c;--anatomy-shade-0:#070708;--anatomy-shade-1:#0b0b0c;--anatomy-shade-2:#0f0f10;--anatomy-shade-3:#141416;--anatomy-hi:#9a9aa0;--anatomy-lo:#4a4a50;--anatomy-faint:#2c2c30}
+.iso[data-theme="light"] .usb-anodized{--anatomy-paper:#2b2b2e;--anatomy-top:#3c3c40;--anatomy-shade-0:#1d1d20;--anatomy-shade-1:#222225;--anatomy-shade-2:#28282b;--anatomy-shade-3:#303034;--anatomy-hi:#0e0e10;--anatomy-lo:#6a6a70;--anatomy-faint:#4a4a50}
+.usb-jacket{--anatomy-paper:#1c3d8c;--anatomy-top:#2a54b4;--anatomy-shade-0:#132c68;--anatomy-shade-1:#173477;--anatomy-shade-2:#1b3c87;--anatomy-shade-3:#204596;--anatomy-hi:#8fb0f5;--anatomy-mid:#5f86e0;--anatomy-lo:#3f66c4;--anatomy-faint:#2d4f9e}
+.iso[data-theme="light"] .usb-jacket{--anatomy-paper:#2f62d6;--anatomy-top:#4677e6;--anatomy-shade-0:#1f47a6;--anatomy-shade-1:#2450b6;--anatomy-shade-2:#2a5ac6;--anatomy-shade-3:#3165d3;--anatomy-hi:#13327e;--anatomy-mid:#7c9ff0;--anatomy-lo:#5f88ea;--anatomy-faint:#4a76e0}
+.usb-jacket .iso-face-text{fill:#ffffff;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-weight:800;letter-spacing:-.02em}
 .iso-stage[data-mode="cut"] .usb-whole,.iso-stage[data-mode="whole"] .usb-cut{display:none}
 .iso-stage{cursor:pointer;outline:none}
 .usb-mode{position:absolute;left:20px;top:38px;z-index:1;padding:3px 8px;border:0;border-radius:0;background:none;box-shadow:0 0 0 1px var(--anatomy-mid);color:var(--anatomy-text);font:10.5px/1.2 var(--anatomy-mono);letter-spacing:.04em;cursor:pointer}
